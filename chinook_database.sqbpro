@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?><sqlb_project><db path="C:/Users/tohke/SQL Practice/chinook sample database/chinook.db" readonly="0" foreign_keys="1" case_sensitive_like="0" temp_store="0" wal_autocheckpoint="1000" synchronous="2"/><attached/><window><main_tabs open="structure browser pragmas query" current="3"/></window><tab_structure><column_width id="0" width="300"/><column_width id="1" width="0"/><column_width id="2" width="150"/><column_width id="3" width="3528"/><column_width id="4" width="0"/><expanded_item id="0" parent="1"/><expanded_item id="1" parent="1"/><expanded_item id="2" parent="1"/><expanded_item id="3" parent="1"/></tab_structure><tab_browse><current_table name="4,6:mainalbums"/><default_encoding codec=""/><browse_table_settings><table schema="main" name="albums" show_row_id="0" encoding="" plot_x_axis="" unlock_view_pk="_rowid_"><sort/><column_widths><column index="1" value="65"/><column index="2" value="300"/><column index="3" value="63"/></column_widths><filter_values/><conditional_formats/><row_id_formats/><display_formats/><hidden_columns/><plot_y_axes/><global_filter/></table></browse_table_settings></tab_browse><tab_sql><sql name="SQL 1">--Which tracks appeared in the most playlists? How many playlist did they appear in?
+WITH table1 AS(
+	SELECT TrackId, COUNT(Playlistid) AS num_playlists FROM playlist_track
+	GROUP BY 1
+	ORDER BY 2 DESC
+	)
+SELECT table1.TrackId, tracks.name, table1.num_playlists FROM table1
+JOIN tracks
+	ON table1.TrackId = tracks.TrackId
+GROUP BY 1
+ORDER BY 3 DESC;	
+
+--Which track generated the most revenue? Which album? Which genre?
+--By track:
+SELECT invoice_items.TrackId, 
+		tracks.name,
+	   ROUND(SUM(invoice_items.UnitPrice*invoice_items.Quantity),2) AS track_revenue 
+FROM invoice_items
+JOIN tracks
+	ON tracks.TrackId = invoice_items.TrackId
+GROUP BY 1
+ORDER BY 3 DESC
+LIMIT 10;
+
+
+
+--By album:
+SELECT albums.AlbumId, 
+       albums.Title, 
+	   ROUND(SUM(invoice_items.UnitPrice*invoice_items.Quantity),2) AS album_revenue
+FROM albums
+JOIN tracks
+	ON albums.AlbumId = tracks.AlbumId
+JOIN invoice_items
+	ON invoice_items.TrackId = tracks.TrackId
+GROUP BY 1
+ORDER BY 3 DESC
+LIMIT 10;
+
+--By genre:
+SELECT tracks.GenreId,
+	   genres.name,
+	   ROUND(SUM(invoice_items.UnitPrice*invoice_items.Quantity),2) AS genre_revenue
+FROM tracks
+JOIN invoice_items
+	ON invoice_items.TrackId = tracks.TrackId
+JOIN genres
+	ON genres.GenreId = tracks.GenreId
+GROUP BY 1
+ORDER BY 3 DESC;
+
+--Which countries have the highest sales revenue? What percent of total revenue does each country make up?
+SELECT invoices.BillingCountry, 
+	   ROUND(SUM(invoice_items.UnitPrice*invoice_items.Quantity),2) AS country_revenue,
+	   ROUND(100.0*SUM(invoice_items.UnitPrice*invoice_items.Quantity)/SUM(SUM(invoice_items.UnitPrice*invoice_items.Quantity)) OVER(),2) AS percentage_of_total
+FROM invoices
+JOIN invoice_items
+	ON invoices.InvoiceId = invoice_items.InvoiceId
+GROUP BY 1
+ORDER BY 2 DESC
+LIMIT 10;
+
+--How many customers did each employee support, what is the average revenue for each sale, and what is their total sale?
+SELECT employees.employeeId, 
+	   COUNT(customers.CustomerId) AS num_customers,
+	   AVG(invoice_items.UnitPrice * invoice_items.Quantity) AS average_revenue,
+	   SUM(invoice_items.UnitPrice * invoice_items.Quantity) AS total_sale
+FROM employees
+LEFT JOIN customers
+	ON customers.SupportRepId = employees.EmployeeId
+LEFT JOIN invoices
+	ON invoices.CustomerId = customers.CustomerId
+LEFT JOIN invoice_items
+	ON invoice_items.InvoiceId = invoices.InvoiceId
+GROUP BY 1
+ORDER BY 2 DESC;
+
+--Do longer or shorter albums tend to generate more revenue?
+WITH track_count AS (
+SELECT albums.AlbumId AS albumid,
+	   albums.title AS title,
+	   tracks.TrackId AS TrackId,
+	   COUNT(tracks.TrackId) AS num_tracks
+FROM albums
+JOIN tracks
+	ON albums.AlbumId = tracks.AlbumId
+GROUP BY albums.AlbumId
+ORDER BY 2 DESC
+)
+SELECT track_count.num_tracks, 
+	   AVG((invoice_items.UnitPrice*invoice_items.Quantity)) AS revenue
+FROM track_count
+JOIN invoice_items
+	ON invoice_items.TrackId = track_count.TrackId
+GROUP BY 1
+ORDER BY 1 DESC;
+
+--Is the number of times a track appears in any playlist a good indicator of sales?
+WITH track_in_playlist AS (
+	SELECT tracks.name AS track_name,
+	       COUNT(playlist_track.trackID) AS count_in_playlist,
+		   tracks.TrackId AS TrackId
+	FROM playlists
+	JOIN playlist_track
+		ON playlists.PlaylistId = playlist_track.PlaylistId
+	JOIN tracks
+		ON tracks.TrackId = playlist_track.TrackId
+	GROUP BY 1
+	ORDER BY 2 DESC
+)
+SELECT track_in_playlist.track_name, 
+	   track_in_playlist.count_in_playlist,
+	   SUM((invoice_items.UnitPrice*invoice_items.Quantity)) AS revenue
+FROM track_in_playlist
+JOIN invoice_items
+	ON track_in_playlist.TrackId = invoice_items.TrackId
+GROUP BY 1
+ORDER BY 3 DESC;
+	   
+--How much revenue is generated each year, and what is its percent change from the previous year?
+WITH previous_year AS (
+	SELECT CAST(strftime('%Y', invoices.InvoiceDate) AS int) AS previous_year, 
+		   ROUND(SUM(invoice_items.UnitPrice * invoice_items.Quantity), 2) AS previous_total
+	FROM invoices
+	JOIN invoice_items
+		ON invoices.InvoiceId = invoice_items.InvoiceId
+	GROUP BY 1
+	ORDER BY 1 ASC),
+	current_year AS (
+SELECT CAST(strftime('%Y', invoices.InvoiceDate) AS int) AS year, 
+	   CAST(ROUND(SUM(invoice_items.UnitPrice * invoice_items.Quantity), 2) AS REAL) AS current_total
+FROM invoices
+JOIN invoice_items
+	ON invoices.InvoiceId = invoice_items.InvoiceId
+GROUP BY 1
+ORDER BY 1 ASC
+)
+SELECT current_year.year,
+	   current_year.current_total,
+	   previous_year.previous_year,
+	   previous_year.previous_total,
+	   ROUND(100.0*(current_year.current_total - previous_year.previous_total)/previous_year.previous_total, 2) AS percentage_change
+FROM current_year
+LEFT JOIN previous_year
+	ON previous_year.previous_year + 1 = year
+GROUP BY 1
+ORDER BY 1 ASC;</sql><current_tab id="0"/></tab_sql></sqlb_project>
